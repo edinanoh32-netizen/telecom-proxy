@@ -157,4 +157,6 @@ app.post('/process-line', async (req, res) => {
 
 // Use Render's dynamically assigned port, or 3000 if running locally
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Telecom Gateway Server running on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Telecom Gateway Server running on port ${PORT}`);
+});
