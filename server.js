@@ -99,6 +99,7 @@ async function updateLeadStatus(leadId, newStatus) {
 }
 
 // The Main API Endpoint
+// The Main API Endpoint
 app.post('/process-line', async (req, res) => {
     const { phoneNumber, provider, method } = req.body;
 
@@ -110,18 +111,20 @@ app.post('/process-line', async (req, res) => {
     // 1. Login
     const isLoggedIn = await login();
     if (!isLoggedIn) {
-        console.log("❌ PROCESS FAILED: Could not log in to backend.");
-        return res.status(500).json({ success: false, message: "Backend Login Failed. Check server credentials." });
+        console.log(" PROCESS FAILED: Could not log in to backend.");
+        // Frontend Arabic Message (Light & generic)
+        return res.status(500).json({ success: false, message: "حدث خطأ في النظام، يرجى المحاولة لاحقاً." });
     }
-    console.log("✅ Successfully logged in and captured session cookies.");
+    console.log(" Successfully logged in and captured session cookies.");
 
     // 2. Find Lead ID
     const leadId = await getLeadIdByPhone(phoneNumber);
     if (!leadId) {
-        console.log(`❌ PROCESS FAILED: Lead ID not found for ${phoneNumber}.`);
-        return res.status(404).json({ success: false, message: "Lead ID not found for this phone number." });
+        console.log(` PROCESS FAILED: Lead ID not found for ${phoneNumber}.`);
+        // Frontend Arabic Message
+        return res.status(404).json({ success: false, message: "عذراً، هذا الرقم غير موجود في النظام." });
     }
-    console.log(`✅ Successfully extracted Lead ID: ${leadId}`);
+    console.log(` Successfully extracted Lead ID: ${leadId}`);
 
     // 3. Execute logic
     console.log(`[3/3] Executing line update sequence...`);
@@ -145,12 +148,14 @@ app.post('/process-line', async (req, res) => {
             await updateLeadStatus(leadId, "2");
         }
 
-        console.log(`✅ PROCESS COMPLETE: Line processed successfully for ${phoneNumber}.`);
-        res.json({ success: true, message: "Line processed successfully!" });
+        console.log(` PROCESS COMPLETE: Line processed successfully for ${phoneNumber}.`);
+        // Frontend Arabic Message (Success)
+        res.json({ success: true, message: "تم تحديث الخط بنجاح!" });
 
     } catch (error) {
-        console.error("❌ PROCESS ERROR:", error);
-        res.status(500).json({ success: false, message: "An error occurred while updating the line." });
+        console.error(" PROCESS ERROR:", error);
+        // Frontend Arabic Message
+        res.status(500).json({ success: false, message: "حدث خطأ أثناء التحديث، يرجى المحاولة مجدداً." });
     }
     console.log(`======================================================\n`);
 });
