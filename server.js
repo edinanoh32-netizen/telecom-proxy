@@ -18,7 +18,9 @@ const CREDENTIALS = {
     password: 'A12345678ab'
 };
 
-
+// Memory storage for the 2-hour rate limit rule
+const recentUpdates = new Map(); 
+const BLOCK_TIME_MS = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -61,7 +63,7 @@ async function getLeadIdByPhone(phoneNumber) {
         });
 
         const data = response.data;
-        console.log("      -> Search API Response:", data); // Prints the raw API result
+        console.log("      -> Search API Response:", data);
 
         let leadId = null;
         if (Array.isArray(data) && data.length > 0) {
@@ -99,47 +101,52 @@ async function updateLeadStatus(leadId, newStatus) {
 }
 
 // The Main API Endpoint
-// The Main API Endpoint
 app.post('/process-line', async (req, res) => {
-    const { phoneNumber, provider, method } = req.body;
+    const { phoneNumber, provider, method, useBlockRule } = req.body;
 
     console.log(`\n======================================================`);
     console.log(`NEW REQUEST RECEIVED`);
-    console.log(`Target Phone: ${phoneNumber} | Provider: ${provider} | Method: ${method}`);
+    console.log(`Target Phone: ${phoneNumber} | Provider: ${provider} | Method: ${method} | BlockRule: ${useBlockRule}`);
     console.log(`======================================================`);
+
+    // --- 2-Hour Cooldown Check ---
+    if (useBlockRule) {
+        const lastUpdate = recentUpdates.get(phoneNumber);
+        if (lastUpdate && (Date.now() - lastUpdate < BLOCK_TIME_MS)) {
+            console.log(`⏳ BLOCKED: ${phoneNumber} is on 2-hour cooldown.`);
+            return res.status(429).json({ 
+                success: false, 
+                message: "تم تحديث هذا الرقم مؤخراً. يرجى المحاولة بعد ساعتين للتخفيف من الضغط." 
+            });
+        }
+    }
 
     // 1. Login
     const isLoggedIn = await login();
     if (!isLoggedIn) {
-        console.log(" PROCESS FAILED: Could not log in to backend.");
-        // Frontend Arabic Message (Light & generic)
+        console.log("❌ PROCESS FAILED: Could not log in to backend.");
         return res.status(500).json({ success: false, message: "حدث خطأ في النظام، يرجى المحاولة لاحقاً." });
     }
-    console.log(" Successfully logged in and captured session cookies.");
+    console.log("✅ Successfully logged in and captured session cookies.");
 
     // 2. Find Lead ID
     const leadId = await getLeadIdByPhone(phoneNumber);
     if (!leadId) {
         console.log(` PROCESS FAILED: Lead ID not found for ${phoneNumber}.`);
-        // Frontend Arabic Message
         return res.status(404).json({ success: false, message: "عذراً، هذا الرقم غير موجود في النظام." });
     }
-    console.log(` Successfully extracted Lead ID: ${leadId}`);
+    console.log(`✅ Successfully extracted Lead ID: ${leadId}`);
 
     // 3. Execute logic
     console.log(`[3/3] Executing line update sequence...`);
     try {
         if (method === "freeze_then_activate") {
-            
-            // Step A: Freeze
             console.log("      >> Step A: Freezing line (Status 4)");
             await updateLeadStatus(leadId, "4");
             
-            // Step B: Wait
             console.log("      >> Step B: Waiting 5 seconds for telecom system to sync...");
             await delay(5000); 
 
-            // Step C: Activate
             console.log("      >> Step C: Reactivating line (Status 2)");
             await updateLeadStatus(leadId, "2");
 
@@ -149,18 +156,22 @@ app.post('/process-line', async (req, res) => {
         }
 
         console.log(` PROCESS COMPLETE: Line processed successfully for ${phoneNumber}.`);
-        // Frontend Arabic Message (Success)
+        
+        // --- Save the number to memory to block it for the next 2 hours ---
+        if (useBlockRule) {
+            recentUpdates.set(phoneNumber, Date.now());
+        }
+
         res.json({ success: true, message: "تم تحديث الخط بنجاح!" });
 
     } catch (error) {
         console.error(" PROCESS ERROR:", error);
-        // Frontend Arabic Message
         res.status(500).json({ success: false, message: "حدث خطأ أثناء التحديث، يرجى المحاولة مجدداً." });
     }
     console.log(`======================================================\n`);
 });
 
-// Use Render's dynamically assigned port, or 3000 if running locally
+// Bind to 0.0.0.0 to fix Render port timeout issue
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Telecom Gateway Server running on port ${PORT}`);
