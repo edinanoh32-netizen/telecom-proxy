@@ -14,15 +14,15 @@ const client = wrapper(axios.create({ jar }));
 
 const BASE_URL = 'https://www.telecom.co.il';
 
-// Use Environment Variables for Render security
+// Hardcoded Credentials
 const CREDENTIALS = {
-    email: process.env.TELECOM_EMAIL || '',
-    password: process.env.TELECOM_PASSWORD || ''
+    email: 'rawad.telecom@aloha.co.il',
+    password: 'A12345678ab'
 };
 
-// Memory storage for the 3-hour rate limit rule
+// Memory storage for the 2-hour rate limit rule
 const recentUpdates = new Map(); 
-const BLOCK_TIME_MS = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
+const BLOCK_TIME_MS = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -78,7 +78,7 @@ async function getLeadIdByPhone(phoneNumber) {
     }
 }
 
-// NEW FUNCTION: Fetch the special We4G ID for Wecom numbers
+// Fetch the special We4G ID for Wecom numbers
 async function getWecomId(phoneNumber) {
     console.log(`[3/4] Fetching special Wecom ID for ${phoneNumber}...`);
     const wecomData = new URLSearchParams();
@@ -102,7 +102,7 @@ async function getWecomId(phoneNumber) {
     }
 }
 
-// MODIFIED FUNCTION: Now accepts the wecomId parameter if available
+// Now accepts the wecomId parameter if available
 async function updateLeadStatus(leadId, newStatus, wecomId = null) {
     console.log(`      -> Sending API request to set Status to: ${newStatus}...`);
     const updateData = new URLSearchParams();
@@ -142,32 +142,32 @@ app.post('/process-line', async (req, res) => {
     if (useBlockRule) {
         const lastUpdate = recentUpdates.get(phoneNumber);
         if (lastUpdate && (Date.now() - lastUpdate < BLOCK_TIME_MS)) {
-            console.log(`⏳ BLOCKED: ${phoneNumber} is on 3-hour cooldown.`);
-            return res.status(429).json({ success: false, message: "تم تحديث هذا الرقم مؤخراً. يرجى المحاولة بعد ثلاث ساعات للتخفيف من الضغط." });
+            console.log(`⏳ BLOCKED: ${phoneNumber} is on 2-hour cooldown.`);
+            return res.status(429).json({ success: false, message: "تم تحديث هذا الرقم مؤخراً. يرجى المحاولة بعد ساعتين للتخفيف من الضغط." });
         }
     }
 
     // 1. Login
     const isLoggedIn = await login();
     if (!isLoggedIn) {
-        console.log("❌ PROCESS FAILED: Could not log in to backend.");
+        console.log(" PROCESS FAILED: Could not log in to backend.");
         return res.status(500).json({ success: false, message: "حدث خطأ في النظام، يرجى المحاولة لاحقاً." });
     }
 
     // 2. Find standard Lead ID
     const leadId = await getLeadIdByPhone(phoneNumber);
     if (!leadId) {
-        console.log(`❌ PROCESS FAILED: Lead ID not found for ${phoneNumber}.`);
+        console.log(` PROCESS FAILED: Lead ID not found for ${phoneNumber}.`);
         return res.status(404).json({ success: false, message: "عذراً، هذا الرقم غير موجود في النظام." });
     }
 
-    // 3. (NEW) Fetch Wecom ID if the provider is Wecom
+    // 3. Fetch Wecom ID if the provider is Wecom
     let wecomId = null;
     if (provider === "wecom" || phoneNumber.startsWith('051')) {
         wecomId = await getWecomId(phoneNumber);
         if (!wecomId) {
-            console.log(`❌ PROCESS FAILED: Could not retrieve Wecom ID for ${phoneNumber}.`);
-            return res.status(500).json({ success: false, message: "فشل في استخراج معرف Wecom الخاص بهذا الرقم." });
+            console.log(` PROCESS FAILED: Could not retrieve Wecom ID for ${phoneNumber}.`);
+            return res.status(500).json({ success: false, message: "فشل في استخراج Wecom" });
         }
     } else {
         console.log(`[3/4] Skipping Wecom ID fetch (Not a Wecom number).`);
