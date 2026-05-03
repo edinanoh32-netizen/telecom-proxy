@@ -13,19 +13,21 @@ const jar = new CookieJar();
 const client = wrapper(axios.create({ jar }));
 
 const BASE_URL = 'https://www.telecom.co.il';
+
+// Use Environment Variables for Render security
 const CREDENTIALS = {
-    email: 'rawad.telecom@aloha.co.il',
-    password: 'A12345678ab'
+    email: process.env.TELECOM_EMAIL || '',
+    password: process.env.TELECOM_PASSWORD || ''
 };
 
-// Memory storage for the 2-hour rate limit rule
+// Memory storage for the 3-hour rate limit rule
 const recentUpdates = new Map(); 
-const BLOCK_TIME_MS = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
+const BLOCK_TIME_MS = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function login() {
-    console.log("[1/3] Attempting to log into the telecom platform...");
+    console.log("[1/4] Attempting to log into the telecom platform...");
     const loginData = new URLSearchParams();
     loginData.append('email', CREDENTIALS.email);
     loginData.append('password', CREDENTIALS.password);
@@ -37,7 +39,6 @@ async function login() {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         });
-        
         console.log("      -> Login API Response:", response.data);
         return response.data.result === true;
     } catch (error) {
@@ -47,7 +48,7 @@ async function login() {
 }
 
 async function getLeadIdByPhone(phoneNumber) {
-    console.log(`[2/3] Searching database for Phone Number: ${phoneNumber}...`);
+    console.log(`[2/4] Searching database for Phone Number: ${phoneNumber}...`);
     const searchData = new URLSearchParams();
     searchData.append('featureClass', 'P');
     searchData.append('style', 'full');
@@ -61,7 +62,6 @@ async function getLeadIdByPhone(phoneNumber) {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         });
-
         const data = response.data;
         console.log("      -> Search API Response:", data);
 
@@ -78,11 +78,41 @@ async function getLeadIdByPhone(phoneNumber) {
     }
 }
 
-async function updateLeadStatus(leadId, newStatus) {
+// NEW FUNCTION: Fetch the special We4G ID for Wecom numbers
+async function getWecomId(phoneNumber) {
+    console.log(`[3/4] Fetching special Wecom ID for ${phoneNumber}...`);
+    const wecomData = new URLSearchParams();
+    wecomData.append('phone_number', phoneNumber);
+
+    try {
+        const response = await client.post(`${BASE_URL}/app/ajax/getWe4gPhoneNumberID`, wecomData, {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+        console.log("      -> Wecom API Response:", response.data);
+        if (response.data && response.data.result === true) {
+            return response.data.id;
+        }
+        return null;
+    } catch (error) {
+        console.error("      -> Wecom ID fetch error:", error.message);
+        return null;
+    }
+}
+
+// MODIFIED FUNCTION: Now accepts the wecomId parameter if available
+async function updateLeadStatus(leadId, newStatus, wecomId = null) {
     console.log(`      -> Sending API request to set Status to: ${newStatus}...`);
     const updateData = new URLSearchParams();
     updateData.append('leadId', leadId);
     updateData.append('newStatus', newStatus);
+    
+    // Inject Wecom ID if this is a Wecom line
+    if (wecomId) {
+        updateData.append('we4g_ID', wecomId);
+    }
 
     try {
         const response = await client.post(`${BASE_URL}/app/ajax/updateStatusTemporary`, updateData, {
@@ -91,7 +121,6 @@ async function updateLeadStatus(leadId, newStatus) {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         });
-        
         console.log("      -> Update API Response:", response.data);
         return true;
     } catch (error) {
@@ -113,11 +142,8 @@ app.post('/process-line', async (req, res) => {
     if (useBlockRule) {
         const lastUpdate = recentUpdates.get(phoneNumber);
         if (lastUpdate && (Date.now() - lastUpdate < BLOCK_TIME_MS)) {
-            console.log(`⏳ BLOCKED: ${phoneNumber} is on 2-hour cooldown.`);
-            return res.status(429).json({ 
-                success: false, 
-                message: "تم تحديث هذا الرقم مؤخراً. يرجى المحاولة بعد ساعتين للتخفيف من الضغط." 
-            });
+            console.log(`⏳ BLOCKED: ${phoneNumber} is on 3-hour cooldown.`);
+            return res.status(429).json({ success: false, message: "تم تحديث هذا الرقم مؤخراً. يرجى المحاولة بعد ثلاث ساعات للتخفيف من الضغط." });
         }
     }
 
@@ -127,51 +153,57 @@ app.post('/process-line', async (req, res) => {
         console.log("❌ PROCESS FAILED: Could not log in to backend.");
         return res.status(500).json({ success: false, message: "حدث خطأ في النظام، يرجى المحاولة لاحقاً." });
     }
-    console.log("✅ Successfully logged in and captured session cookies.");
 
-    // 2. Find Lead ID
+    // 2. Find standard Lead ID
     const leadId = await getLeadIdByPhone(phoneNumber);
     if (!leadId) {
-        console.log(` PROCESS FAILED: Lead ID not found for ${phoneNumber}.`);
+        console.log(`❌ PROCESS FAILED: Lead ID not found for ${phoneNumber}.`);
         return res.status(404).json({ success: false, message: "عذراً، هذا الرقم غير موجود في النظام." });
     }
-    console.log(`✅ Successfully extracted Lead ID: ${leadId}`);
 
-    // 3. Execute logic
-    console.log(`[3/3] Executing line update sequence...`);
+    // 3. (NEW) Fetch Wecom ID if the provider is Wecom
+    let wecomId = null;
+    if (provider === "wecom" || phoneNumber.startsWith('051')) {
+        wecomId = await getWecomId(phoneNumber);
+        if (!wecomId) {
+            console.log(`❌ PROCESS FAILED: Could not retrieve Wecom ID for ${phoneNumber}.`);
+            return res.status(500).json({ success: false, message: "فشل في استخراج معرف Wecom الخاص بهذا الرقم." });
+        }
+    } else {
+        console.log(`[3/4] Skipping Wecom ID fetch (Not a Wecom number).`);
+    }
+
+    // 4. Execute logic
+    console.log(`[4/4] Executing line update sequence...`);
     try {
         if (method === "freeze_then_activate") {
             console.log("      >> Step A: Freezing line (Status 4)");
-            await updateLeadStatus(leadId, "4");
+            await updateLeadStatus(leadId, "4", wecomId);
             
             console.log("      >> Step B: Waiting 5 seconds for telecom system to sync...");
             await delay(5000); 
 
             console.log("      >> Step C: Reactivating line (Status 2)");
-            await updateLeadStatus(leadId, "2");
+            await updateLeadStatus(leadId, "2", wecomId);
 
         } else if (method === "direct_activate") {
             console.log("      >> Step A: Direct Activation (Status 2)");
-            await updateLeadStatus(leadId, "2");
+            await updateLeadStatus(leadId, "2", wecomId);
         }
 
-        console.log(` PROCESS COMPLETE: Line processed successfully for ${phoneNumber}.`);
+        console.log(`✅ PROCESS COMPLETE: Line processed successfully for ${phoneNumber}.`);
         
-        // --- Save the number to memory to block it for the next 2 hours ---
-        if (useBlockRule) {
-            recentUpdates.set(phoneNumber, Date.now());
-        }
+        if (useBlockRule) recentUpdates.set(phoneNumber, Date.now());
 
         res.json({ success: true, message: "تم تحديث الخط بنجاح!" });
 
     } catch (error) {
-        console.error(" PROCESS ERROR:", error);
+        console.error("❌ PROCESS ERROR:", error);
         res.status(500).json({ success: false, message: "حدث خطأ أثناء التحديث، يرجى المحاولة مجدداً." });
     }
     console.log(`======================================================\n`);
 });
 
-// Bind to 0.0.0.0 to fix Render port timeout issue
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Telecom Gateway Server running on port ${PORT}`);
