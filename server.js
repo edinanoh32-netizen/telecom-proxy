@@ -143,7 +143,7 @@ app.post('/process-line', async (req, res) => {
         const lastUpdate = recentUpdates.get(phoneNumber);
         if (lastUpdate && (Date.now() - lastUpdate < BLOCK_TIME_MS)) {
             console.log(`⏳ BLOCKED: ${phoneNumber} is on 2-hour cooldown.`);
-            return res.status(429).json({ success: false, message: "تم تحديث هذا الرقم مؤخراً. يرجى المحاولة بعد ساعتين للتخفيف من الضغط." });
+            return res.status(429).json({ success: false, message: "تم تحديث هذا الرقم مؤخراً. يرجى المحاولة بعد ثلاث ساعات للتخفيف من الضغط." });
         }
     }
 
